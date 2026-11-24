@@ -5,6 +5,7 @@ import hashlib
 import heapq
 import json
 import math
+import os
 import statistics
 from functools import lru_cache
 from pathlib import Path
@@ -26,12 +27,38 @@ MANIFEST_PATH = PROCESSED_DIR / "manifest.json"
 INDEX_METADATA_FILENAME = "metadata.json"
 BM25_INDEX_FILENAME = "bm25.json"
 DENSE_EMBEDDINGS_FILENAME = "embeddings.npy"
-DENSE_PARTIAL_EMBEDDINGS_FILENAME = "embeddings.partial.npy"
-DENSE_PROGRESS_FILENAME = "progress.json"
+GENERAL_EMBEDDER = "sentence-transformers/all-MiniLM-L6-v2"
+BIOMEDICAL_EMBEDDER = "NeuML/pubmedbert-base-embeddings"
+EMBEDDING_MODELS = {
+    "miniLM": GENERAL_EMBEDDER,
+    "Bert": BIOMEDICAL_EMBEDDER,
+}
+EMBEDDING_MODEL_NICKNAMES = {
+    model_name: nickname for nickname, model_name in EMBEDDING_MODELS.items()
+}
 CHUNK_PATHS = {
     chunking: CHUNKS_DIR / f"{chunking}.jsonl"
     for chunking in ("document", "section", "sentence")
 }
+
+
+def _sha256(path):
+    """Return the SHA-256 digest of a file, reading it in bounded blocks."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as input_file:
+        for block in iter(lambda: input_file.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _write_json_atomic(path, value, indent=None):
+    """Write JSON to a temporary sibling, then atomically replace ``path``."""
+    path = Path(path)
+    temporary_path = path.with_suffix(path.suffix + ".tmp")
+    with temporary_path.open("w", encoding="utf-8", newline="\n") as output_file:
+        json.dump(value, output_file, indent=indent)
+        output_file.write("\n")
+    os.replace(temporary_path, path)
 
 
 def load_jsonl(path):
@@ -187,11 +214,11 @@ def _load_verified_chunks(source_path, expected_hash, expected_count):
 
 
 @lru_cache(maxsize=None)
-def get_embedding_model(model_name):
+def get_embedding_model(model_name, device=None):
     """Load and cache an embedding model for repeated query encoding."""
     from sentence_transformers import SentenceTransformer
 
-    return SentenceTransformer(model_name)
+    return SentenceTransformer(model_name, device=device)
 
 
 @lru_cache(maxsize=None)

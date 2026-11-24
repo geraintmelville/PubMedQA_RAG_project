@@ -5,18 +5,21 @@ This repository prepares PubMedQA data, builds BM25 and dense retrieval indexes,
 ## Requirements
 
 - Python with `numpy` and `sentence-transformers` installed for indexing and retrieval.
-- The `openai` package and an `OPENAI_API_KEY` environment variable for LLM answers.
-- `transformers` and a locally cached tokenizer for the diagnostic's context-token counts.
-- Network access for the initial dataset downloads and for downloading embedding or reranker models that are not already cached. The diagnostic only loads its tokenizer from the local Hugging Face cache.
+- The `openai` and `python-dotenv` packages and an `OPENAI_API_KEY` environment variable for LLM answers.
+- Network access for the initial dataset downloads and for downloading embedding or reranker models that are not already cached.
 
-There is currently no dependency lockfile or `requirements.txt` in the repository. From the repository root, create and activate a virtual environment, then install the packages used by the scripts:
+There is no dependency lockfile. The project metadata in `pyproject.toml` declares the retrieval and diagnostic dependencies; LLM and notebook dependencies are optional extras. From the repository root, create and activate a virtual environment, then install the project in editable mode:
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-python -m pip install numpy sentence-transformers transformers
-python -m pip install openai
+python -m pip install -e ".[llm,notebook]"
 ```
+
+Editable installation makes the `src` package importable from Python launched
+outside the repository, including notebooks and tests using this environment.
+Use `python -m pip install -e .` if you only need retrieval and diagnostic
+dependencies, or add `[llm]` and/or `[notebook]` for those features.
 
 The scripts below are shown for PowerShell and should be run from the repository root. `data/` is ignored by Git and is generated locally.
 
@@ -28,7 +31,7 @@ python scripts\prepare_corpus.py
 
 This downloads the labeled PubMedQA file (`ori_pqal.json`) and unlabeled file (`ori_pqau.json`), normalizes the records, creates question splits and relevance judgments, and writes three chunk collections. The data sources and download URLs are defined in `src/processing/load.py`.
 
-The corpus contains every labeled PubMedQA document plus 10,000 distractor documents sampled from the unlabeled set with seed `42`. Documents shared by both input sets are deduplicated. Questions are shuffled with that same seeded generator and split 80/20 into `dev` and `test`; the exact split is reproducible for the same inputs. Each labeled question has one qrel pointing to its PubMed document.
+The corpus contains every labeled PubMedQA document plus 10,000 distractor documents sampled from unlabeled records whose IDs are not in the labeled set, with seed `42`. The manifest's `duplicate_count` records how many IDs the two source files share. Questions are shuffled with that same seeded generator and split 80/20 into `dev` and `test`; the exact split is reproducible for the same inputs. Each labeled question has one qrel pointing to its PubMed document.
 
 Generated files:
 
@@ -54,7 +57,7 @@ data/
         └── sentence.jsonl
 ```
 
-`manifest.json` records input checksums and record counts. The raw files are downloaded again each time `prepare_corpus.py` runs. The chunkers in `src/processing/` can also be run individually after corpus preparation, but `prepare_corpus.py` is the normal entry point.
+`manifest.json` records input checksums and record counts. Existing raw files are reused, and only missing files are downloaded. The chunkers in `src/processing/` can also be run individually after corpus preparation, but `prepare_corpus.py` is the normal entry point.
 
 ## Build retrieval indexes
 
@@ -71,65 +74,51 @@ This creates BM25 indexes for all three chunkings and dense indexes for both con
 
 The resulting paths are `data/indexes/bm25/<chunking>/` and `data/indexes/<model>/<chunking>/`, with model-name `/` characters replaced by `--`. For example, the MiniLM index directory is `data/indexes/sentence-transformers--all-MiniLM-L6-v2/section/`. Each index contains metadata and refers to its shared processed chunk file rather than copying it. At query time, the metadata checksum is verified so changed chunk files are detected.
 
-Index preparation skips indexes whose metadata, model, and corpus checksum are already current. Dense embeddings are written in resumable blocks; an interrupted build can continue from its saved progress. The default embedding batch size is 64. Override it with `DENSE_BATCH_SIZE`, and set `DENSE_DEVICE` to `cuda` or `cpu` to choose the device; without it, Sentence Transformers selects the device.
+Index preparation skips indexes whose metadata, model, and corpus checksum are already current. Dense embeddings are encoded and saved as a NumPy array. Sentence Transformers selects the device and batch behavior.
 
 ## Run the retrieval diagnostic
 
-`scripts/diagnostic.py` runs a baseline on the labeled `dev` questions. It compares BM25 and the two dense models across document, section, and sentence chunks, for nine configurations. It measures recall at small, medium, and large cutoffs (document k = 1, 3, and 5). Section and sentence k values are scaled using average whitespace-word counts per chunk so the estimated retrieved text is comparable across chunkings.
+`scripts/diagnostic.py` runs a baseline on a selected labeled split. It compares BM25 and the two dense models across document, section, and sentence chunks, for nine configurations. It measures recall at small, medium, and large cutoffs (document k = 1, 3, and 5). Section and sentence k values are scaled using average whitespace-word counts per chunk so the estimated retrieved text is comparable across chunkings.
 
 Run it after the corpus and indexes are ready:
 
 ```powershell
-python scripts\diagnostic.py
+python scripts\diagnostic.py dev
+python scripts\diagnostic.py test
 ```
 
-The script settings, including split and tokenizer, are constants near the top of `scripts/diagnostic.py`; it does not currently accept command-line options. Each invocation writes `summary.csv`, `per_question.csv`, and `run.json` into the next numbered directory under `data/experiments/diagnostic/<split>/`. Token estimates use the configured tokenizer from the local Hugging Face cache and count selected chunk text only (excluding prompts and special tokens). Recall is the fraction of relevant source documents retrieved, averaged across questions. Retrieval latency is warm per-question scoring and top-k selection latency; it excludes model loading and token counting. The diagnostic does not run an answer-generating model. To evaluate `test`, change `SPLIT` in the script before running it.
+Each invocation writes `per_question.csv` first, then derives `summary.csv` with `pandas.DataFrame.groupby(["chunking", "method"]).mean()`, and records run metadata in `run.json`. Context size estimates count whitespace-separated words in selected chunk text only (excluding prompts), matching the word-count basis used to scale k across chunkings. Recall is the fraction of relevant source documents retrieved, averaged across questions. Retrieval latency is warm per-question scoring and top-k selection latency; it excludes model loading and word counting. The diagnostic does not run an answer-generating model.
 
-## Build an experiment report
+## Explore results
 
-After at least one experiment has produced a `run.json` and summary CSV, generate a standalone HTML report:
+Open `results.ipynb` from the repository root in Jupyter after running one or more experiments:
 
 ```powershell
-python scripts\report.py
+jupyter notebook results.ipynb
 ```
 
-By default, the report scans `data/experiments/` recursively and writes `data/experiments/report.html`. Open that file directly in a browser. The report embeds run metadata and summary rows, so it needs no web server or external libraries. It reads the summary CSV named in `run.json` (`summary_csv`), or falls back to `summary.csv`, `metrics.csv`, or `results.csv`. Diagnostic runs show chunking, retrieval, latency, average tokens, and recall for each size. Older diagnostic runs without size-specific recall need to be rerun to populate those values.
-
-To use a different experiment root or output path:
-
-```powershell
-python scripts\report.py --experiments-dir path\to\experiments --output path\to\report.html
-```
+The notebook reads the latest numbered diagnostic and LLM run for the selected split, summarizes per-question retrieval with pandas, plots medium-budget recall and answer accuracy, and reports percentile bootstrap confidence intervals for recall. Change `SPLIT` in the first code cell to `test` to inspect the test runs. The `*_note` fields previously stored in `run.json` are documented here: diagnostic latency is warm retrieval and top-k selection time (model loading and word counting excluded); token counts are whitespace-separated words from selected chunks (prompts excluded); section and sentence cutoffs scale document cutoffs by average chunk word count. LLM latency is end-to-end and can include first-use loading; token usage comes from the Responses API and averages exclude unreported usage; cost is estimated using the rates configured in `src/prompt.py`, including the cached-input rate.
 
 ## Use retrieval from Python
 
 Scorers return the highest-scoring `(chunk, score)` pairs in descending score order; the default is 10 results. Pass a larger `top_k` to retain more candidates. Set `top_k=None` only when every score is needed; that returns all scores in corpus order. Hybrid retrieval fuses bounded BM25 and dense candidate lists using reciprocal-rank fusion (RRF), since their raw scores have different scales. Reranking applies a cross-encoder to the best initial candidates.
 
 ```python
-from src.scoring.bm25 import bm25_score
-from src.scoring.dense import dense_score
-from src.retrieval.hybrid import hybrid
-from src.retrieval.rerank import rerank
+from src.retrieval.search import search
 
 question = "Does treatment X reduce outcome Y?"
-model = "sentence-transformers/all-MiniLM-L6-v2"
 
-bm25_top10 = bm25_score("section", question, {"k1": 1.5, "b": 0.75})
-dense_top10 = dense_score("section", question, model)
-
-bm25_candidates = bm25_score("section", question, top_k=50)
-dense_candidates = dense_score("section", question, model, top_k=50)
-hybrid_candidates = hybrid(
-    bm25_candidates, dense_candidates, top_k=50, candidate_k=50
-)
-reranked_top10 = rerank(hybrid_candidates, question, top_k=10)
+bm25_top10 = search("section", question, scoring="bm25")
+dense_top10 = search("section", question, scoring="miniLM")
+hybrid_top10 = search("section", question, scoring="miniLM", method="hybrid")
+reranked_top10 = search("section", question, scoring="miniLM", method="rerank")
 ```
 
 Dense query scoring requires the same embedding model used to build the selected index. Reranking uses `ncbi/MedCPT-Cross-Encoder` by default and downloads or loads that model when first used. Models are cached in-process for repeated queries.
 
 ## Generate an answer
 
-`src/prompt/prompt.py` provides `answer_question(question, chunking_method,
+`src/prompt.py` provides `answer_question(question, chunking_method,
 scoring_method, retrieval_method)`. The scoring method is `"bm25"`, `"miniLM"`,
 or `"Bert"`. The retrieval method is `None` for no context, `"top_k"` for
 highest-scoring chunks, `"hybrid"` to combine BM25 and dense scoring, or
@@ -137,7 +126,7 @@ highest-scoring chunks, `"hybrid"` to combine BM25 and dense scoring, or
 Pass all four arguments explicitly. The function returns a dictionary with the
 answer, end-to-end latency, token counts, and estimated USD cost. Model,
 passage limits, and token prices are constants at the top of
-`src/prompt/prompt.py`.
+`src/prompt.py`.
 
 Put your API key in a `.env` file in the repository root, then call the function:
 
@@ -146,7 +135,7 @@ OPENAI_API_KEY=your-api-key
 ```
 
 ```powershell
-python -c "from src.prompt.prompt import answer_question; print(answer_question('Does treatment X reduce outcome Y?', 'section', 'miniLM', 'hybrid'))"
+python -c "from src.prompt import answer_question; print(answer_question('Does treatment X reduce outcome Y?', 'section', 'miniLM', 'hybrid'))"
 ```
 
 Answers are normalized to exactly `yes`, `maybe`, or `no`. Current model
@@ -182,9 +171,8 @@ results and a failed status are recorded if a run stops with an error.
 scripts/
 ├── prepare_corpus.py    # Download and prepare source data and chunks
 ├── prepare_indexes.py   # Build all configured BM25 and dense indexes
-├── diagnostic.py        # Run the fixed retrieval baseline
+├── diagnostic.py        # Run retrieval diagnostics on dev or test
 ├── llm_run.py           # Run sequential LLM answer-generation experiments
-└── report.py            # Combine experiment summaries into HTML
 src/
 ├── processing/          # Source loading, corpus creation, and chunking
 ├── indexing/            # BM25 and dense index builders
@@ -193,5 +181,6 @@ src/
 ├── prompt/              # Context assembly and answer generation
 └── common.py            # Shared paths, model caches, and helpers
 notebook.ipynb            # Exploratory PubMedQA example
+results.ipynb             # Experiment summaries, plots, and bootstrap CIs
 plan.md                   # Project plan and notes
 ```

@@ -1,0 +1,12 @@
+numpy
+pandas
+sentence-transformers
+tqdm
+
+[llm]
+openai
+python-dotenv
+
+[notebook]
+jupyter
+matplotlib

@@ -18,13 +18,15 @@ def load_data():
     labeled_path = LABELED_DATA_PATH
     unlabeled_path = UNLABELED_DATA_PATH
 
-    urlretrieve(LABELED_URL, labeled_path)
-    urlretrieve(UNLABELED_URL, unlabeled_path)
+    if not labeled_path.exists():
+        urlretrieve(LABELED_URL, labeled_path)
+    if not unlabeled_path.exists():
+        urlretrieve(UNLABELED_URL, unlabeled_path)
 
     with labeled_path.open(encoding="utf-8") as input_file:
         labeled_records = json.load(input_file)
     with unlabeled_path.open(encoding="utf-8") as input_file:
         unlabeled_records = json.load(input_file)
 
-    print(f"Downloaded and loaded PubMedQA-L and PubMedQA-U from {RAW_DIR}")
+    print(f"Loaded PubMedQA-L and PubMedQA-U from {RAW_DIR}")
     return labeled_records, unlabeled_records

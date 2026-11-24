@@ -1,4 +1,3 @@
-import hashlib
 import json
 import random
 
@@ -10,10 +9,11 @@ from src.common import (
     QRELS_DIR,
     QUESTIONS_DIR,
     UNLABELED_DATA_PATH,
+    _sha256,
 )
 
 
-def _normalize_document(pmid, record, source_split):
+def _normalize_document(pmid, record, source):
     if len(record["LABELS"]) != len(record["CONTEXTS"]):
         raise ValueError(f"PubMed ID {pmid} has mismatched LABELS and CONTEXTS.")
     return {
@@ -22,7 +22,7 @@ def _normalize_document(pmid, record, source_split):
             {"section": section, "text": text}
             for section, text in zip(record["LABELS"], record["CONTEXTS"])
         ],
-        "source_split": source_split,
+        "source": source,
     }
 
 
@@ -38,14 +38,6 @@ def _write_qrels(path, questions, qrels_by_question):
             output_file.write("\t".join(qrels_by_question[question["id"]]) + "\n")
 
 
-def _sha256(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as input_file:
-        for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def create_corpus(labeled_records, unlabeled_records):
     """Write normalized documents, question splits, qrels, and a manifest."""
     labeled_path = LABELED_DATA_PATH
@@ -58,29 +50,14 @@ def create_corpus(labeled_records, unlabeled_records):
     distractor_ids = sorted(set(unlabeled_records) - gold_ids)
     random_generator = random.Random(42)
     sampled_distractor_ids = random_generator.sample(distractor_ids, 10_000)
-    selected_ids = gold_ids | set(sampled_distractor_ids)
-
-    corpus_documents = []
-    for pmid in selected_ids:
-        sources = []
-        if pmid in labeled_records:
-            sources.append(("labeled", labeled_records[pmid]))
-        if pmid in unlabeled_records:
-            sources.append(("unlabeled", unlabeled_records[pmid]))
-        normalized = [
-            _normalize_document(pmid, record, name)
-            for name, record in sources
-        ]
-        if (
-            len(normalized) == 2
-            and normalized[0]["contexts"] != normalized[1]["contexts"]
-        ):
-            raise ValueError(
-                f"PubMed ID {pmid} has different CONTEXTS in both input files."
-            )
-        document = normalized[0]
-        document["source_split"] = [name for name, _ in sources]
-        corpus_documents.append(document)
+    corpus_documents = [
+        _normalize_document(pmid, labeled_records[pmid], "labeled")
+        for pmid in gold_ids
+    ]
+    corpus_documents.extend(
+        _normalize_document(pmid, unlabeled_records[pmid], "unlabeled")
+        for pmid in sampled_distractor_ids
+    )
     corpus_documents.sort(key=lambda document: document["ID"])
     _write_jsonl(DOCUMENTS_PATH, corpus_documents)
 
@@ -135,7 +112,7 @@ def create_corpus(labeled_records, unlabeled_records):
         json.dump(manifest, output_file, ensure_ascii=False, indent=2)
         output_file.write("\n")
 
-    gold_count = sum("labeled" in document["source_split"] for document in corpus_documents)
+    gold_count = sum(document["source"] == "labeled" for document in corpus_documents)
     print(
         f"Wrote {len(corpus_documents)} corpus documents ({gold_count} gold, "
         f"{len(corpus_documents) - gold_count} distractors) to {PROCESSED_DIR}"

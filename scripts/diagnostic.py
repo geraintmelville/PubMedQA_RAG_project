@@ -4,69 +4,36 @@ The baseline compares BM25 with two dense embedding models. It evaluates only
 the top-k chunks selected for the context and does not call an answer LLM.
 """
 
+import argparse
 import json
-import sys
 import time
 from pathlib import Path
 
+import pandas as pd
+from tqdm import tqdm
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from src.common import (  # noqa: E402
+from src.common import (
     CHUNK_PATHS,
+    EMBEDDING_MODELS,
+    EMBEDDING_MODEL_NICKNAMES,
     QRELS_DIR,
     QUESTIONS_DIR,
     allocate_run_dir,
     load_jsonl,
     load_qrels,
-    mean,
     write_csv,
 )
-from src.scoring.bm25 import bm25_score  # noqa: E402
-from src.scoring.dense import dense_score  # noqa: E402
+from src.retrieval.search import search
 
 
-# Run settings. Edit these values here when a different diagnostic run is needed.
-SPLIT = "dev"
-TOKENIZER_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EXPERIMENTS_DIR = PROJECT_ROOT / "data" / "experiments" / "diagnostic"
-
-# Keep the report nickname beside each full model ID used to load it.
-EMBEDDING_MODELS = {
-    "sentence-transformers/all-MiniLM-L6-v2": "miniLM",
-    "NeuML/pubmedbert-base-embeddings": "Bert",
-}
 
 # Document cutoffs define the small, medium, and large retrieval budgets. For
 # section and sentence chunks, k is scaled by average whitespace-word count so
 # the estimated amount of retrieved text stays roughly constant.
 SIZE_NAMES = ("small", "medium", "large")
 DOCUMENT_K_BY_SIZE = {"small": 1, "medium": 3, "large": 5}
-
-
-def _load_tokenizer(model_name):
-    try:
-        from transformers import AutoTokenizer
-    except ImportError as error:
-        raise RuntimeError(
-            "Token counts need transformers. Install the project's model dependencies."
-        ) from error
-
-    try:
-        return AutoTokenizer.from_pretrained(model_name, local_files_only=True)
-    except (OSError, ValueError) as error:
-        raise RuntimeError(
-            f"Tokenizer {model_name!r} is not available in the local model cache. "
-            "Set TOKENIZER_MODEL to a locally cached tokenizer."
-        ) from error
-
-
-def _context_token_count(chunks, tokenizer):
-    return sum(
-        len(tokenizer.encode(chunk["text"], add_special_tokens=False))
-        for chunk, _ in chunks
-    )
 
 
 def _average_chunk_lengths():
@@ -107,14 +74,7 @@ def _recall(context_chunks, qrel):
     return len(gold_ids & retrieved_ids) / len(gold_ids)
 
 
-def _score(method, question, chunking, model, k):
-    if method == "bm25":
-        return bm25_score(chunking, question, top_k=k)
-    else:
-        return dense_score(chunking, question, model, top_k=k)
-
-
-def _run_configuration(questions, qrels, tokenizer, chunking, method, model, ks):
+def _run_configuration(questions, qrels, chunking, method, model, ks):
     max_k = max(ks.values())
     config = {
         "chunking": chunking,
@@ -123,74 +83,76 @@ def _run_configuration(questions, qrels, tokenizer, chunking, method, model, ks)
 
     print(f"  Loading index/model and warming up {method} {model}...", flush=True)
     # Load model and index state before collecting query-time measurements.
-    _score(method, questions[0]["question"], chunking, model, max_k)
+    search(
+        chunking,
+        questions[0]["question"],
+        scoring=method,
+        method="top_k",
+        top_k=max_k,
+    )
 
     detail_rows = []
-    latencies = []
-    token_counts = {size: [] for size in SIZE_NAMES}
-    recall_values = {size: [] for size in SIZE_NAMES}
-    progress_interval = max(1, min(50, len(questions) // 10 or 1))
-    for question_index, question in enumerate(questions, 1):
+    for question in tqdm(questions, desc=f"{chunking} {method}", unit="question"):
         start = time.perf_counter()
-        context_chunks = _score(method, question["question"], chunking, model, max_k)
+        context_chunks = search(
+            chunking,
+            question["question"],
+            scoring=method,
+            method="top_k",
+            top_k=max_k,
+        )
         latency_ms = (time.perf_counter() - start) * 1000
-        latencies.append(latency_ms)
         detail = {
             **config,
             "question_id": question["id"],
             "retrieval_latency_ms": round(latency_ms, 3),
         }
         qrel = qrels[question["id"]]
+        # The cutoffs are nested. Count each ranked chunk once and save the
+        # cumulative word totals needed by the three cutoffs.
+        word_totals = []
+        word_total = 0
+        for chunk, _ in context_chunks:
+            word_total += len(chunk["text"].split())
+            word_totals.append(word_total)
+        size_metrics = {}
         for size in SIZE_NAMES:
             size_chunks = context_chunks[:ks[size]]
-            token_count = _context_token_count(size_chunks, tokenizer)
-            recall = _recall(size_chunks, qrel)
-            token_counts[size].append(token_count)
-            recall_values[size].append(recall)
-            detail[f"k_{size}"] = ks[size]
-            detail[f"tokens_{size}"] = token_count
-            detail[f"recall_{size}"] = round(recall, 5)
-        detail_rows.append(detail)
-        if question_index % progress_interval == 0 or question_index == len(questions):
-            print(
-                f"  {chunking} {method} {model}: "
-                f"{question_index}/{len(questions)} questions",
-                flush=True,
+            word_count = (
+                word_totals[min(ks[size], len(word_totals)) - 1]
+                if word_totals
+                else 0
             )
-
-    summary_row = {
-        **config,
-        "mean_retrieval_latency_ms": round(mean(latencies, default=0.0), 3),
-    }
-    for size in SIZE_NAMES:
-        summary_row[f"mean_tokens_{size}"] = round(
-            mean(token_counts[size], default=0.0), 2
-        )
-    for size in SIZE_NAMES:
-        summary_row[f"recall_{size}"] = round(
-            mean(recall_values[size], default=0.0), 5
-        )
-    return summary_row, detail_rows
+            size_metrics.update(
+                {
+                    f"k_{size}": ks[size],
+                    f"words_{size}": word_count,
+                    f"recall_{size}": round(_recall(size_chunks, qrel), 5),
+                }
+            )
+        detail.update(size_metrics)
+        detail_rows.append(detail)
+    return detail_rows
 
 
-def run():
-    questions = load_jsonl(QUESTIONS_DIR / f"{SPLIT}.jsonl")
-    qrels = load_qrels(QRELS_DIR / f"{SPLIT}.tsv")
-    questions = [question for question in questions if question["id"] in qrels]
+def run(split):
+    questions = load_jsonl(QUESTIONS_DIR / f"{split}.jsonl")
+    qrels = load_qrels(QRELS_DIR / f"{split}.tsv")
     if not questions:
-        raise ValueError(f"No questions found for split {SPLIT!r}.")
+        raise ValueError(f"No questions found for split {split!r}.")
 
-    tokenizer = _load_tokenizer(TOKENIZER_MODEL)
     average_chunk_lengths = _average_chunk_lengths()
     top_k_by_size = _top_k_by_size(average_chunk_lengths)
-    run_number, output_dir = allocate_run_dir(EXPERIMENTS_DIR, SPLIT)
+    run_number, output_dir = allocate_run_dir(EXPERIMENTS_DIR, split)
 
     configurations = []
     for chunking in CHUNK_PATHS:
         configurations.append((chunking, "bm25", ""))
-        configurations.extend((chunking, nickname, model) for model, nickname in EMBEDDING_MODELS.items())
+        configurations.extend(
+            (chunking, nickname, model)
+            for nickname, model in EMBEDDING_MODELS.items()
+        )
 
-    summaries = []
     details = []
     total = len(configurations)
     for index, (chunking, method, model) in enumerate(configurations, 1):
@@ -199,34 +161,37 @@ def run():
             f"k={top_k_by_size[chunking]}",
             flush=True,
         )
-        summary, per_question = _run_configuration(
-            questions, qrels, tokenizer, chunking, method, model,
+        per_question = _run_configuration(
+            questions, qrels, chunking, method, model,
             top_k_by_size[chunking],
         )
-        summaries.append(summary)
         details.extend(per_question)
         print(
             f"[{index}/{total}] Completed {chunking} {method} {model}",
             flush=True,
         )
 
-    write_csv(output_dir / "summary.csv", summaries)
     write_csv(output_dir / "per_question.csv", details)
+    df = pd.read_csv(output_dir / "per_question.csv", dtype={"question_id": str})
+    summary = df.groupby(["chunking", "method"]).mean(numeric_only=True)
+    summary = summary.rename(
+        columns={
+            "retrieval_latency_ms": "mean_retrieval_latency_ms",
+            **{f"words_{size}": f"mean_words_{size}" for size in SIZE_NAMES},
+        }
+    ).reset_index()
+    summary.to_csv(output_dir / "summary.csv", index=False)
     metadata = {
-        "name": f"Diagnostic {SPLIT} run {run_number}",
+        "name": f"Diagnostic {split} run {run_number}",
         "experiment": "diagnostic",
-        "split": SPLIT,
+        "split": split,
         "run_number": run_number,
         "status": "completed",
         "question_count": len(questions),
         "document_k_by_size": DOCUMENT_K_BY_SIZE,
         "top_k_by_size": top_k_by_size,
         "average_chunk_words": average_chunk_lengths,
-        "k_scaling_note": "Section and sentence k values scale document cutoffs by the corpus average whitespace-word count per chunk; observed context tokens are measured with the configured tokenizer.",
-        "embedding_models": EMBEDDING_MODELS,
-        "tokenizer_model": tokenizer.name_or_path,
-        "token_count_note": "Sum of selected chunk text tokens; excludes prompts and special tokens.",
-        "latency_note": "Warm per-question retrieval and top-k selection; model loading is excluded. Token counting is excluded.",
+        "embedding_models": EMBEDDING_MODEL_NICKNAMES,
         "configurations": len(configurations),
         "summary_csv": "summary.csv",
         "per_question_csv": "per_question.csv",
@@ -234,8 +199,10 @@ def run():
     (output_dir / "run.json").write_text(
         json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
     )
-    print(f"Wrote {len(summaries)} configurations to {output_dir.resolve()}")
+    print(f"Wrote {len(configurations)} configurations to {output_dir.resolve()}")
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("split", choices=("dev", "test"))
+    run(parser.parse_args().split)
