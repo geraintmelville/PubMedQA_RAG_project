@@ -22,31 +22,27 @@ A controlled study with a research question, using a RAG pipeline as the test be
 
 ## 3. Code structure
 
-Keep the code organized around a repeatable path from the raw corpora to retrieval results. Treat this as a target structure that can grow with the project; do not create every module before it is needed.
+Keep the code organized around a repeatable path from the raw corpora to retrieval results. The current repository layout is:
 
 ```text
 PubMedQA_RAG_project/
 ├── data/
 │   ├── raw/                 # downloaded JSON, unchanged
-│   ├── interim/             # normalized records, combined questions, manifest
-│   ├── corpus/              # chunks, split questions and qrels
-│   └── processed/            # chunks and cached indexes/embeddings
-├── configs/
-│   ├── data.yaml
-│   └── baseline.yaml
-├── src/pubmedqa_rag/
-│   ├── data/                # load, normalize, deduplicate, split
-│   ├── chunking/            # abstract, section, sentence-window strategies
-│   ├── retrieval/           # BM25, dense, hybrid, reranking
-│   ├── evaluation/          # metrics, bootstrap, slices
-│   └── experiments/         # config-driven runners
+│   └── processed/           # normalized corpus, chunks, indexes, and experiments
+├── src/
+│   ├── processing/          # source loading, corpus creation, and chunking
+│   ├── retrieval/           # BM25, dense, hybrid, reranking, and search
+│   ├── prompt.py            # context assembly and answer generation
+│   └── common.py            # shared paths, model caches, and helpers
 ├── scripts/
-│   ├── prepare_data.py
-│   └── run_experiment.py
-└── results/                 # tables, plots, run metadata
+│   ├── prepare_corpus.py
+│   ├── prepare_indexes.py
+│   ├── diagnostic.py
+│   ├── llm_run.py
+│   └── results.ipynb        # experiment summaries, plots, and bootstrap CIs
 ```
 
-Start with a straightforward `scripts/prepare_data.py` and the smallest end-to-end BM25 baseline. Add reusable modules under `src/pubmedqa_rag/` as the code grows beyond those initial scripts. Keep raw inputs unchanged, and write derived data and experiment outputs separately. Use shared document, question, and qrel formats across retrieval methods so comparisons remain consistent.
+Keep raw inputs unchanged, and write derived data and experiment outputs separately. Use shared document, question, and qrel formats across retrieval methods so comparisons remain consistent.
 
 ## 4. Lexical overlap analysis (before building anything)
 

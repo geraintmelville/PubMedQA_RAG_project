@@ -1,9 +1,6 @@
-from src.common import CHUNK_PATHS, EMBEDDING_MODELS, INDEXES_DIR
+from src.common import CHUNK_PATHS, EMBEDDING_MODELS, INDEXES_DIR, dense_index_path
 from src.retrieval.bm25 import build_index as build_bm25_index
 from src.retrieval.dense import build_index as build_dense_index
-
-
-EMBEDDING_MODEL_NAMES = tuple(EMBEDDING_MODELS.values())
 
 
 def main():
@@ -18,11 +15,11 @@ def main():
     for chunking, chunks_path in CHUNK_PATHS.items():
         build_bm25_index(chunks_path, INDEXES_DIR / "bm25" / chunking)
 
-    for model_name in EMBEDDING_MODEL_NAMES:
+    for model_name in EMBEDDING_MODELS.values():
         for chunking, chunks_path in CHUNK_PATHS.items():
             build_dense_index(
                 chunks_path,
-                INDEXES_DIR / model_name.replace("/", "--") / chunking,
+                dense_index_path(model_name, chunking),
                 model_name,
             )
 

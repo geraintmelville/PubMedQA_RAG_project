@@ -5,13 +5,12 @@ from pathlib import Path
 import numpy as np
 
 from src.common import (
-    CHUNK_PATHS,
     DENSE_EMBEDDINGS_FILENAME,
-    INDEXES_DIR,
     INDEX_METADATA_FILENAME,
     PROJECT_ROOT,
-    _sha256,
-    _write_json_atomic,
+    dense_index_path,
+    sha256_file,
+    write_json,
     get_embedding_model,
     load_index_chunks,
     load_jsonl,
@@ -50,7 +49,7 @@ def _index_is_current(index_path, corpus_path, model_name, corpus_hash):
 def build_index(corpus_path, index_path, model_name, model=None):
     corpus_path = Path(corpus_path).resolve()
     index_path = Path(index_path)
-    corpus_hash = _sha256(corpus_path)
+    corpus_hash = sha256_file(corpus_path)
     if _index_is_current(index_path, corpus_path, model_name, corpus_hash):
         print(f"Dense index is current; skipping {index_path}")
         return False
@@ -66,7 +65,7 @@ def build_index(corpus_path, index_path, model_name, model=None):
         model.encode([chunk["text"] for chunk in corpus], normalize_embeddings=True),
     )
 
-    _write_json_atomic(
+    write_json(
         index_path / INDEX_METADATA_FILENAME,
         {
             "retriever": "dense",
@@ -83,14 +82,14 @@ def build_index(corpus_path, index_path, model_name, model=None):
     return True
 
 
-def score(chunking_method, query, model, top_k=10):
+def score(chunking_method, query, model_name, top_k=10):
     """Return dense cosine similarity pairs for a prepared embedding index."""
-    if not model:
-        raise ValueError("model must be the embedding model name used to build the index")
-    index_path = INDEXES_DIR / model.replace("/", "--") / chunking_method
+    if not model_name:
+        raise ValueError("model_name must be the embedding model name used to build the index")
+    index_path = dense_index_path(model_name, chunking_method)
     chunks = load_index_chunks(index_path)
     embeddings = _load_embeddings(index_path / DENSE_EMBEDDINGS_FILENAME)
-    embedding_model = get_embedding_model(model)
+    embedding_model = get_embedding_model(model_name)
     query_embedding = embedding_model.encode(query, normalize_embeddings=True)
     scores = embeddings @ query_embedding
     if top_k is not None:
@@ -98,12 +97,3 @@ def score(chunking_method, query, model, top_k=10):
     return list(zip(chunks, scores.tolist()))
 
 
-build_dense_index = build_index
-dense_score = score
-
-
-if __name__ == "__main__":
-    corpus_path = CHUNK_PATHS["section"]
-    model_name = "sentence-transformers/all-MiniLM-L6-v2"
-    index_path = INDEXES_DIR / model_name.replace("/", "--") / "section"
-    build_dense_index(corpus_path, index_path, model_name)

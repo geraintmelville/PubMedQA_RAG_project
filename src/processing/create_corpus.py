@@ -9,7 +9,7 @@ from src.common import (
     QRELS_DIR,
     QUESTIONS_DIR,
     UNLABELED_DATA_PATH,
-    _sha256,
+    sha256_file,
 )
 
 
@@ -32,16 +32,16 @@ def _write_jsonl(path, records):
             output_file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def _write_qrels(path, questions, qrels_by_question):
+def _write_qrels(path, questions):
     with path.open("w", encoding="utf-8", newline="\n") as output_file:
         for question in sorted(questions, key=lambda item: item["id"]):
-            output_file.write("\t".join(qrels_by_question[question["id"]]) + "\n")
+            output_file.write(
+                f"{question['id']}\tQ0\t{question['pubmed_id']}\t1\n"
+            )
 
 
 def create_corpus(labeled_records, unlabeled_records):
     """Write normalized documents, question splits, qrels, and a manifest."""
-    labeled_path = LABELED_DATA_PATH
-    unlabeled_path = UNLABELED_DATA_PATH
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     QUESTIONS_DIR.mkdir(parents=True, exist_ok=True)
     QRELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -64,7 +64,7 @@ def create_corpus(labeled_records, unlabeled_records):
     questions = [
         {
             "id": f"q:{pmid}",
-            "pubmed_id": pmid,
+            "pubmed_id": int(pmid),
             "question": record["QUESTION"],
             "label": record["final_decision"],
             "long_answer": record["LONG_ANSWER"],
@@ -75,21 +75,16 @@ def create_corpus(labeled_records, unlabeled_records):
     random_generator.shuffle(questions)
     split_index = int(len(questions) * 0.8)
     question_splits = {"dev": questions[:split_index], "test": questions[split_index:]}
-    qrels_by_question = {
-        f"q:{pmid}": (f"q:{pmid}", "Q0", str(int(pmid)), "1")
-        for pmid in labeled_records
-    }
-
     _write_jsonl(QUESTIONS_DIR / "all.jsonl", questions)
-    _write_qrels(QRELS_DIR / "all.tsv", questions, qrels_by_question)
+    _write_qrels(QRELS_DIR / "all.tsv", questions)
     for split_name, split_questions in question_splits.items():
         split_questions = sorted(split_questions, key=lambda item: item["id"])
         _write_jsonl(QUESTIONS_DIR / f"{split_name}.jsonl", split_questions)
-        _write_qrels(QRELS_DIR / f"{split_name}.tsv", split_questions, qrels_by_question)
+        _write_qrels(QRELS_DIR / f"{split_name}.tsv", split_questions)
 
     input_checksums = {
-        "labeled": _sha256(labeled_path),
-        "unlabeled": _sha256(unlabeled_path),
+        "labeled": sha256_file(LABELED_DATA_PATH),
+        "unlabeled": sha256_file(UNLABELED_DATA_PATH),
     }
     manifest = {
         "schema_version": "1.0",
@@ -104,7 +99,7 @@ def create_corpus(labeled_records, unlabeled_records):
         "output_record_counts": {
             "documents": len(corpus_documents),
             "questions": len(questions),
-            "qrels": len(qrels_by_question),
+            "qrels": len(questions),
         },
         "duplicate_count": len(gold_ids & set(unlabeled_records)),
     }

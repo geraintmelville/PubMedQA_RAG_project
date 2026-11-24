@@ -11,12 +11,11 @@ import numpy as np
 
 from src.common import (
     BM25_INDEX_FILENAME,
-    CHUNK_PATHS,
     INDEXES_DIR,
     INDEX_METADATA_FILENAME,
     PROJECT_ROOT,
-    _sha256,
-    _write_json_atomic,
+    sha256_file,
+    write_json,
     load_index_chunks,
     load_jsonl,
     select_top_k_arrays,
@@ -24,7 +23,6 @@ from src.common import (
 
 
 DEFAULT_PARAMETERS = {"k1": 1.5, "b": 0.75}
-INDEX_FORMAT_VERSION = 2
 
 
 def tokenize(text):
@@ -36,7 +34,7 @@ def build_index(corpus_path, index_path):
     """Build a BM25 index from a chunk JSONL file."""
     corpus_path = Path(corpus_path).resolve()
     index_path = Path(index_path)
-    corpus_hash = _sha256(corpus_path)
+    corpus_hash = sha256_file(corpus_path)
     metadata_path = index_path / INDEX_METADATA_FILENAME
     bm25_path = index_path / BM25_INDEX_FILENAME
     if metadata_path.is_file() and bm25_path.is_file():
@@ -45,7 +43,6 @@ def build_index(corpus_path, index_path):
                 metadata = json.load(input_file)
             if (
                 metadata.get("retriever") == "bm25"
-                and metadata.get("format_version") == INDEX_FORMAT_VERSION
                 and metadata.get("source_corpus")
                 == corpus_path.relative_to(PROJECT_ROOT).as_posix()
                 and metadata.get("source_sha256") == corpus_hash
@@ -68,7 +65,7 @@ def build_index(corpus_path, index_path):
             postings[term].append((document_index, frequencies[term]))
 
     index_path.mkdir(parents=True, exist_ok=True)
-    _write_json_atomic(
+    write_json(
         bm25_path,
         {
             "document_frequencies": dict(document_frequencies),
@@ -81,11 +78,10 @@ def build_index(corpus_path, index_path):
             ),
         },
     )
-    _write_json_atomic(
+    write_json(
         metadata_path,
         {
             "retriever": "bm25",
-            "format_version": INDEX_FORMAT_VERSION,
             "source_corpus": corpus_path.relative_to(PROJECT_ROOT).as_posix(),
             "source_sha256": corpus_hash,
             "chunk_count": len(corpus),
@@ -139,7 +135,3 @@ def score(chunking_method, query, parameters=None, top_k=10):
         return select_top_k_arrays(chunks, scores, top_k)
     return list(zip(chunks, scores.tolist()))
 
-
-# Backward-compatible names for scripts and external notebooks.
-build_bm25_index = build_index
-bm25_score = score

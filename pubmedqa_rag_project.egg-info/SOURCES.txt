@@ -12,6 +12,7 @@ src/processing/__init__.py
 src/processing/chunk.py
 src/processing/create_corpus.py
 src/processing/load.py
+src/retrieval/__init__.py
 src/retrieval/bm25.py
 src/retrieval/dense.py
 src/retrieval/hybrid.py

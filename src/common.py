@@ -5,7 +5,6 @@ import hashlib
 import heapq
 import json
 import math
-import os
 import statistics
 from functools import lru_cache
 from pathlib import Path
@@ -19,6 +18,7 @@ QUESTIONS_DIR = PROCESSED_DIR / "questions"
 QRELS_DIR = PROCESSED_DIR / "qrels"
 CHUNKS_DIR = PROCESSED_DIR / "chunks"
 INDEXES_DIR = DATA_DIR / "indexes"
+EXPERIMENTS_DIR = DATA_DIR / "experiments"
 
 LABELED_DATA_PATH = RAW_DIR / "ori_pqal.json"
 UNLABELED_DATA_PATH = RAW_DIR / "ori_pqau.json"
@@ -42,7 +42,7 @@ CHUNK_PATHS = {
 }
 
 
-def _sha256(path):
+def sha256_file(path):
     """Return the SHA-256 digest of a file, reading it in bounded blocks."""
     digest = hashlib.sha256()
     with Path(path).open("rb") as input_file:
@@ -51,14 +51,17 @@ def _sha256(path):
     return digest.hexdigest()
 
 
-def _write_json_atomic(path, value, indent=None):
-    """Write JSON to a temporary sibling, then atomically replace ``path``."""
+def write_json(path, value, indent=None):
+    """Write a JSON file."""
     path = Path(path)
-    temporary_path = path.with_suffix(path.suffix + ".tmp")
-    with temporary_path.open("w", encoding="utf-8", newline="\n") as output_file:
+    with path.open("w", encoding="utf-8", newline="\n") as output_file:
         json.dump(value, output_file, indent=indent)
         output_file.write("\n")
-    os.replace(temporary_path, path)
+
+
+def dense_index_path(model_name, chunking_method):
+    """Return the index directory for a dense model and chunking strategy."""
+    return INDEXES_DIR / model_name.replace("/", "--") / chunking_method
 
 
 def load_jsonl(path):
@@ -182,35 +185,18 @@ def allocate_run_dir(experiments_dir, split):
 
 
 def load_index_chunks(index_path):
-    """Load the shared source corpus and verify it matches an index manifest."""
+    """Load the shared source corpus referenced by an index manifest."""
     index_path = Path(index_path)
     with (index_path / INDEX_METADATA_FILENAME).open(encoding="utf-8") as input_file:
         metadata = json.load(input_file)
     source_path = (PROJECT_ROOT / metadata["source_corpus"]).resolve()
-    expected_hash = metadata["source_sha256"]
-    expected_count = metadata["chunk_count"]
-    return _load_verified_chunks(str(source_path), expected_hash, expected_count)
+    return _load_index_chunks(str(source_path), metadata["source_sha256"])
 
 
 @lru_cache(maxsize=8)
-def _load_verified_chunks(source_path, expected_hash, expected_count):
-    digest = hashlib.sha256()
-    with Path(source_path).open("rb") as input_file:
-        for block in iter(lambda: input_file.read(1024 * 1024), b""):
-            digest.update(block)
-    actual_hash = digest.hexdigest()
-    if actual_hash != expected_hash:
-        raise ValueError(
-            f"Source chunks at {source_path} changed since the index was built; "
-            "run scripts/prepare_indexes.py again."
-        )
-    chunks = load_jsonl(source_path)
-    if len(chunks) != expected_count:
-        raise ValueError(
-            f"Source chunks at {source_path} contain {len(chunks)} rows, "
-            f"but the index expects {expected_count}."
-        )
-    return chunks
+def _load_index_chunks(source_path, source_sha256):
+    """Cache chunks by source path and the hash recorded when the index was built."""
+    return load_jsonl(source_path)
 
 
 @lru_cache(maxsize=None)

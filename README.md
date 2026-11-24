@@ -72,7 +72,7 @@ This creates BM25 indexes for all three chunkings and dense indexes for both con
 - `sentence-transformers/all-MiniLM-L6-v2`
 - `NeuML/pubmedbert-base-embeddings`
 
-The resulting paths are `data/indexes/bm25/<chunking>/` and `data/indexes/<model>/<chunking>/`, with model-name `/` characters replaced by `--`. For example, the MiniLM index directory is `data/indexes/sentence-transformers--all-MiniLM-L6-v2/section/`. Each index contains metadata and refers to its shared processed chunk file rather than copying it. At query time, the metadata checksum is verified so changed chunk files are detected.
+The resulting paths are `data/indexes/bm25/<chunking>/` and `data/indexes/<model>/<chunking>/`, with model-name `/` characters replaced by `--`. For example, the MiniLM index directory is `data/indexes/sentence-transformers--all-MiniLM-L6-v2/section/`. Each index contains metadata and refers to its shared processed chunk file rather than copying it. When indexes are prepared, the metadata checksum is compared with the chunk file to decide whether the index needs rebuilding.
 
 Index preparation skips indexes whose metadata, model, and corpus checksum are already current. Dense embeddings are encoded and saved as a NumPy array. Sentence Transformers selects the device and batch behavior.
 
@@ -91,13 +91,13 @@ Each invocation writes `per_question.csv` first, then derives `summary.csv` with
 
 ## Explore results
 
-Open `results.ipynb` from the repository root in Jupyter after running one or more experiments:
+Open `scripts/results.ipynb` from the repository root in Jupyter after running one or more experiments:
 
 ```powershell
-jupyter notebook results.ipynb
+jupyter notebook scripts/results.ipynb
 ```
 
-The notebook reads the latest numbered diagnostic and LLM run for the selected split, summarizes per-question retrieval with pandas, plots medium-budget recall and answer accuracy, and reports percentile bootstrap confidence intervals for recall. Change `SPLIT` in the first code cell to `test` to inspect the test runs. The `*_note` fields previously stored in `run.json` are documented here: diagnostic latency is warm retrieval and top-k selection time (model loading and word counting excluded); token counts are whitespace-separated words from selected chunks (prompts excluded); section and sentence cutoffs scale document cutoffs by average chunk word count. LLM latency is end-to-end and can include first-use loading; token usage comes from the Responses API and averages exclude unreported usage; cost is estimated using the rates configured in `src/prompt.py`, including the cached-input rate.
+The notebook reads the latest numbered diagnostic and LLM run for the selected split, summarizes per-question retrieval with pandas, plots medium-budget recall and answer accuracy, and reports percentile bootstrap confidence intervals for recall. Change `SPLIT` in the first code cell to `test` to inspect the test runs. Run metadata records diagnostic latency as warm retrieval and top-k selection time (model loading and word counting excluded), and context size as whitespace-separated words in selected chunks (prompts excluded). Section and sentence cutoffs scale document cutoffs by average chunk word count. LLM latency is end-to-end and can include first-use loading; token usage comes from the Responses API and averages exclude unreported usage; cost is estimated using the rates configured in `src/prompt.py`, including the cached-input rate.
 
 ## Use retrieval from Python
 
@@ -173,14 +173,11 @@ scripts/
 ├── prepare_indexes.py   # Build all configured BM25 and dense indexes
 ├── diagnostic.py        # Run retrieval diagnostics on dev or test
 ├── llm_run.py           # Run sequential LLM answer-generation experiments
+└── results.ipynb        # Experiment summaries, plots, and bootstrap CIs
 src/
 ├── processing/          # Source loading, corpus creation, and chunking
-├── indexing/            # BM25 and dense index builders
-├── scoring/             # BM25 and dense query scoring
-├── retrieval/           # Hybrid fusion and cross-encoder reranking
-├── prompt/              # Context assembly and answer generation
+├── retrieval/           # BM25, dense, hybrid, reranking, and search
+├── prompt.py            # Context assembly and answer generation
 └── common.py            # Shared paths, model caches, and helpers
-notebook.ipynb            # Exploratory PubMedQA example
-results.ipynb             # Experiment summaries, plots, and bootstrap CIs
 plan.md                   # Project plan and notes
 ```

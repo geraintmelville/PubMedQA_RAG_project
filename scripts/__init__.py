@@ -1,1 +1,1 @@
-"""Project command-line scripts, available for the LLM smoke-test helper."""
+"""Command-line entry points for corpus preparation and experiments."""

@@ -25,7 +25,6 @@ def _section_chunks(document):
             "document_id": document["ID"],
             "chunk_type": "section",
             "chunk_index": chunk_index,
-            "section_index": chunk_index,
             "source": document["source"],
             "text": context["text"],
         }
@@ -50,8 +49,6 @@ def _sentence_chunks(document):
             chunk_index += 1
 
 
-# Keep this mapping in sync with CHUNK_PATHS: each key identifies both the
-# chunking strategy and its output file.
 CHUNKERS = {
     "document": _document_chunks,
     "section": _section_chunks,
@@ -61,13 +58,8 @@ CHUNKERS = {
 
 def chunk(name):
     """Write chunks for one of the strategies named in ``CHUNK_PATHS``."""
-    try:
-        chunks_for_document = CHUNKERS[name]
-        output_path = CHUNK_PATHS[name]
-    except KeyError:
-        raise ValueError(
-            f"Unknown chunking strategy {name!r}; choose from {', '.join(CHUNKERS)}."
-        ) from None
+    chunks_for_document = CHUNKERS[name]
+    output_path = CHUNK_PATHS[name]
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     documents = load_jsonl(DOCUMENTS_PATH)
@@ -80,8 +72,8 @@ def chunk(name):
 
 
 def chunk_all():
-    """Write every chunk corpus declared in ``CHUNK_PATHS``."""
-    for name in CHUNK_PATHS:
+    """Write every chunk corpus declared in ``CHUNKERS``."""
+    for name in CHUNKERS:
         chunk(name)
 
 
