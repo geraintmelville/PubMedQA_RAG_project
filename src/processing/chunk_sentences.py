@@ -1,17 +1,15 @@
 import json
 import re
-from pathlib import Path
 
+from src.common import CHUNK_PATHS, DOCUMENTS_PATH, load_jsonl
 
-project_dir = Path(__file__).resolve().parents[2]
-input_path = project_dir / "data" / "interim" / "corpus.jsonl"
-output_path = project_dir / "data" / "corpus" / "sentence_chunks.jsonl"
+input_path = DOCUMENTS_PATH
+output_path = CHUNK_PATHS["sentence"]
 
 
 def chunk_sentences():
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with input_path.open(encoding="utf-8") as input_file:
-        documents = [json.loads(line) for line in input_file if line.strip()]
+    documents = load_jsonl(input_path)
 
     with output_path.open("w", encoding="utf-8", newline="\n") as output_file:
         for document in documents:
