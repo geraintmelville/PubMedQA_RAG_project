@@ -29,9 +29,11 @@ BM25_INDEX_FILENAME = "bm25.json"
 DENSE_EMBEDDINGS_FILENAME = "embeddings.npy"
 GENERAL_EMBEDDER = "sentence-transformers/all-MiniLM-L6-v2"
 BIOMEDICAL_EMBEDDER = "NeuML/pubmedbert-base-embeddings"
+GTE_EMBEDDER = "Alibaba-NLP/gte-modernbert-base"
 EMBEDDING_MODELS = {
     "miniLM": GENERAL_EMBEDDER,
     "Bert": BIOMEDICAL_EMBEDDER,
+    "GTE": GTE_EMBEDDER,
 }
 EMBEDDING_MODEL_NICKNAMES = {
     model_name: nickname for nickname, model_name in EMBEDDING_MODELS.items()

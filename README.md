@@ -31,7 +31,7 @@ python scripts\prepare_corpus.py
 
 This downloads the labeled PubMedQA file (`ori_pqal.json`) and unlabeled file (`ori_pqau.json`), normalizes the records, creates question splits and relevance judgments, and writes three chunk collections. The data sources and download URLs are defined in `src/processing/load.py`.
 
-The corpus contains every labeled PubMedQA document plus 10,000 distractor documents sampled from unlabeled records whose IDs are not in the labeled set, with seed `42`. The manifest's `duplicate_count` records how many IDs the two source files share. Questions are shuffled with that same seeded generator and split 80/20 into `dev` and `test`; the exact split is reproducible for the same inputs. Each labeled question has one qrel pointing to its PubMed document.
+The corpus contains every labeled PubMedQA document plus 10,000 distractor documents sampled from unlabeled records whose IDs are not in the labeled set, with seed `42`. The manifest's `duplicate_count` records how many IDs the two source files share. Questions are shuffled with that same seeded generator and split 25/75 into `dev` and `test`; the exact split is reproducible for the same inputs. Each labeled question has one qrel pointing to its PubMed document.
 
 Generated files:
 
@@ -67,18 +67,25 @@ After preparing the corpus, build the indexes with:
 python scripts\prepare_indexes.py
 ```
 
-This creates BM25 indexes for all three chunkings and dense indexes for both configured embedding models:
+To prepare only one or more dense models, select their nicknames. For example, to build only GTE:
+
+```powershell
+python -m scripts.prepare_indexes --models GTE
+```
+
+This creates BM25 indexes for all three chunkings and dense indexes for the configured embedding models:
 
 - `sentence-transformers/all-MiniLM-L6-v2`
 - `NeuML/pubmedbert-base-embeddings`
+- `Alibaba-NLP/gte-modernbert-base`
 
 The resulting paths are `data/indexes/bm25/<chunking>/` and `data/indexes/<model>/<chunking>/`, with model-name `/` characters replaced by `--`. For example, the MiniLM index directory is `data/indexes/sentence-transformers--all-MiniLM-L6-v2/section/`. Each index contains metadata and refers to its shared processed chunk file rather than copying it. When indexes are prepared, the metadata checksum is compared with the chunk file to decide whether the index needs rebuilding.
 
-Index preparation skips indexes whose metadata, model, and corpus checksum are already current. Dense embeddings are encoded and saved as a NumPy array. Sentence Transformers selects the device and batch behavior.
+Index preparation skips indexes whose metadata, model, and corpus checksum are already current. Adding a model therefore creates its dense indexes while reusing current BM25 and dense indexes for the existing models. Dense embeddings are encoded and saved as a NumPy array. Sentence Transformers selects the device and batch behavior.
 
 ## Run the retrieval diagnostic
 
-`scripts/diagnostic.py` runs a baseline on a selected labeled split. It compares BM25 and the two dense models across document, section, and sentence chunks, for nine configurations. It measures recall at small, medium, and large cutoffs (document k = 1, 3, and 5). Section and sentence k values are scaled using average whitespace-word counts per chunk so the estimated retrieved text is comparable across chunkings.
+`scripts/diagnostic.py` runs a baseline on a selected labeled split. It compares BM25 and the three dense models across document, section, and sentence chunks, for twelve configurations. It measures recall at small, medium, and large cutoffs (document k = 1, 3, and 5). Section and sentence k values are scaled using average whitespace-word counts per chunk so the estimated retrieved text is comparable across chunkings.
 
 Run it after the corpus and indexes are ready:
 

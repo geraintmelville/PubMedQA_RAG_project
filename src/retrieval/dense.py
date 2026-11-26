@@ -60,9 +60,17 @@ def build_index(corpus_path, index_path, model_name, model=None):
         model = get_embedding_model(model_name)
     index_path.mkdir(parents=True, exist_ok=True)
     _load_embeddings.cache_clear()
+    print(
+        f"Encoding {len(corpus)} chunks with {model_name} for {index_path.name}",
+        flush=True,
+    )
     np.save(
         index_path / DENSE_EMBEDDINGS_FILENAME,
-        model.encode([chunk["text"] for chunk in corpus], normalize_embeddings=True),
+        model.encode(
+            [chunk["text"] for chunk in corpus],
+            normalize_embeddings=True,
+            show_progress_bar=True,
+        ),
     )
 
     write_json(

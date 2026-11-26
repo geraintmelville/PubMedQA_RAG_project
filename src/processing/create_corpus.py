@@ -73,7 +73,7 @@ def create_corpus(labeled_records, unlabeled_records):
     ]
     questions.sort(key=lambda question: question["id"])
     random_generator.shuffle(questions)
-    split_index = int(len(questions) * 0.8)
+    split_index = int(len(questions) * 0.25)
     question_splits = {"dev": questions[:split_index], "test": questions[split_index:]}
     _write_jsonl(QUESTIONS_DIR / "all.jsonl", questions)
     _write_qrels(QRELS_DIR / "all.tsv", questions)
@@ -89,8 +89,8 @@ def create_corpus(labeled_records, unlabeled_records):
     manifest = {
         "schema_version": "1.0",
         "inputs": {
-            "labeled": {"path": str(labeled_path), "sha256": input_checksums["labeled"]},
-            "unlabeled": {"path": str(unlabeled_path), "sha256": input_checksums["unlabeled"]},
+            "labeled": {"path": str(LABELED_DATA_PATH), "sha256": input_checksums["labeled"]},
+            "unlabeled": {"path": str(UNLABELED_DATA_PATH), "sha256": input_checksums["unlabeled"]},
         },
         "input_record_counts": {
             "labeled": len(labeled_records),
