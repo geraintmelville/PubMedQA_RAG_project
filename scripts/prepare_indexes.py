@@ -31,9 +31,7 @@ def main():
             f"{missing_files}"
         )
 
-    selected_models = (
-        set(args.models) if args.models is not None else set(EMBEDDING_MODELS)
-    )
+    selected_models = set(args.models) if args.models is not None else set(EMBEDDING_MODELS)
     model_nicknames = [
         nickname for nickname in EMBEDDING_MODELS if nickname in selected_models
     ]

@@ -1,8 +1,4 @@
-"""Run a small retrieval baseline on the prepared PubMedQA dev/test split.
-
-The baseline compares BM25 with two dense embedding models. It evaluates only
-the top-k chunks selected for the context and does not call an answer LLM.
-"""
+"""Run a retrieval baseline on PubMedQA using BM25 and dense encoders."""
 
 import argparse
 import json

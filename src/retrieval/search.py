@@ -21,7 +21,7 @@ def _score(chunking, query, scoring, top_k):
 def search(chunking, query, scoring, method="top_k", top_k=10, candidate_k=None):
     """Retrieve chunks using top-k scoring, reciprocal-rank fusion, or reranking.
 
-    ``scoring`` is ``bm25``, ``miniLM``, or ``Bert``; ``method`` is
+    ``scoring`` is ``bm25``, ``miniLM``, ``Bert``, or ``GTE``; ``method`` is
     ``top_k``, ``hybrid``, or ``rerank``.
     """
     if method == "top_k":

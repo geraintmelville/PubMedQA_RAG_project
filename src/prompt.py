@@ -111,7 +111,9 @@ def answer_question(question, chunking_method, scoring_method, retrieval_method)
     top_k = None
     if retrieval_method is not None:
         if scoring_method not in {"bm25", *EMBEDDING_MODELS}:
-            raise ValueError("scoring_method must be 'bm25', 'miniLM', or 'Bert'")
+            raise ValueError(
+                "scoring_method must be 'bm25', 'miniLM', 'Bert', or 'GTE'"
+            )
         top_k = TOP_K_BY_CHUNKING[chunking_method]
 
     scored_chunks = _retrieve_context(

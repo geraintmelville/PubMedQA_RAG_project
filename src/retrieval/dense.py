@@ -43,21 +43,51 @@ def _index_is_current(index_path, corpus_path, model_name, corpus_hash):
         == corpus_path.resolve().relative_to(PROJECT_ROOT).as_posix()
         and metadata.get("source_sha256") == corpus_hash
         and metadata.get("chunk_count") == embedding_count
+        and isinstance(metadata.get("max_seq_length"), int)
+        and isinstance(metadata.get("truncation_rate"), (int, float))
+        and isinstance(metadata.get("truncated_chunk_count"), int)
+        and isinstance(metadata.get("truncation_sample_count"), int)
+        and metadata.get("truncation_sample_count") == embedding_count
     )
+
+
+def _truncation_stats(tokenizer, texts, max_seq_length, batch_size=256):
+    """Count corpus texts whose tokenized input exceeds the encoder limit."""
+    truncated_count = 0
+    for start in range(0, len(texts), batch_size):
+        tokenized = tokenizer(
+            texts[start : start + batch_size],
+            add_special_tokens=True,
+            padding=False,
+            truncation=False,
+        )
+        truncated_count += sum(
+            len(input_ids) > max_seq_length for input_ids in tokenized["input_ids"]
+        )
+    return {
+        "truncation_rate": truncated_count / len(texts) if texts else 0.0,
+        "truncated_chunk_count": truncated_count,
+        "truncation_sample_count": len(texts),
+    }
 
 
 def build_index(corpus_path, index_path, model_name, model=None):
     corpus_path = Path(corpus_path).resolve()
     index_path = Path(index_path)
     corpus_hash = sha256_file(corpus_path)
-    if _index_is_current(index_path, corpus_path, model_name, corpus_hash):
-        print(f"Dense index is current; skipping {index_path}")
-        return False
-
-    corpus = load_jsonl(corpus_path)
-
     if model is None:
         model = get_embedding_model(model_name)
+    max_seq_length = int(model.max_seq_length)
+    if _index_is_current(index_path, corpus_path, model_name, corpus_hash):
+        with (index_path / INDEX_METADATA_FILENAME).open(encoding="utf-8") as input_file:
+            metadata = json.load(input_file)
+        if metadata.get("max_seq_length") == max_seq_length:
+            print(f"Dense index is current; skipping {index_path}")
+            return False
+
+    corpus = load_jsonl(corpus_path)
+    texts = [chunk["text"] for chunk in corpus]
+    truncation = _truncation_stats(model.tokenizer, texts, max_seq_length)
     index_path.mkdir(parents=True, exist_ok=True)
     _load_embeddings.cache_clear()
     print(
@@ -67,7 +97,7 @@ def build_index(corpus_path, index_path, model_name, model=None):
     np.save(
         index_path / DENSE_EMBEDDINGS_FILENAME,
         model.encode(
-            [chunk["text"] for chunk in corpus],
+            texts,
             normalize_embeddings=True,
             show_progress_bar=True,
         ),
@@ -82,6 +112,8 @@ def build_index(corpus_path, index_path, model_name, model=None):
             "source_sha256": corpus_hash,
             "chunk_count": len(corpus),
             "normalize_embeddings": True,
+            "max_seq_length": max_seq_length,
+            **truncation,
         },
         indent=2,
     )

@@ -60,8 +60,8 @@ Validate the paraphrases: check overlap actually drops and that a sample still p
 | --- | --- |
 | Chunking | whole abstract; section-level (background/methods/results/conclusion); sentence windows (sizes 1, 3, 5, with and without overlap); optionally fixed-token windows as a naive baseline |
 | Lexical | BM25 (tune k1 and b; with and without stemming and stopword handling) |
-| Embedding model | general-purpose (e.g. a recent open model) vs. biomedical-domain; optionally small vs. large within each family |
-| Retrieval method | BM25 only; dense only; hybrid via reciprocal rank fusion; hybrid via weighted score fusion |
+| Embedding model | General-purpose MiniLM (`sentence-transformers/all-MiniLM-L6-v2`); biomedical PubMedBERT (`NeuML/pubmedbert-base-embeddings`); Alibaba GTE (`Alibaba-NLP/gte-modernbert-base`) |
+| Retrieval method | BM25 only; each dense encoder; hybrid BM25 + dense via reciprocal rank fusion |
 | Reranking | none vs. cross-encoder over the top 20-50 candidates |
 | Corpus size | small, medium, large (from the distractor setup) |
 
@@ -81,7 +81,8 @@ Vary one factor at a time from a fixed baseline first (cheap, interpretable), th
 This section is where the project goes beyond a benchmark table.
 
 - **Embedding quality diagnostics:** similarity distributions for relevant vs. non-relevant pairs; how well each model separates them; hubness (documents that appear in too many top-k lists).
-- **Chunking and embeddings:** does embedding quality degrade on very short chunks or very long ones? Plot retrieval quality against chunk length.
+- **Chunking and embeddings:** does embedding quality degrade on very short or very long chunks? Plot retrieval quality against chunk length.
+- **Context windows:** report each encoder's maximum sequence length and the fraction of chunks truncated at that limit, by chunking strategy.
 - **Failure inspection:** for each retrieval method, categorise 30-50 misses (vocabulary mismatch, chunk boundary split the evidence, near-duplicate distractor, ambiguous question, label noise).
 - **Complementarity:** measure the overlap between BM25 misses and dense misses. This is the empirical justification (or refutation) for hybrid retrieval.
 - Optional: a small embedding visualisation (UMAP) coloured by chunk type or question category, if it adds insight.
@@ -132,7 +133,7 @@ LLM-as-judge faithfulness evaluation is a stretch goal here, with the 50-example
 ## What changed from the original
 
 - The research question and slice-based analysis now lead, replacing the product framing.
-- Corpus size, chunk length and embedding model became experimental factors.
+- Corpus size, chunk length, and embedding model are experimental factors.
 - A new section analyses embedding behaviour and complementarity between retrievers.
 - Statistical rigour is stronger: interaction effects and paired significance tests.
 - Generation shrank to a downstream check on a few configurations, with faithfulness judging as a stretch goal.
