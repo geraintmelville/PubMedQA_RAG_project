@@ -31,10 +31,17 @@ def main():
             f"{missing_files}"
         )
 
+    selected_models = (
+        set(args.models) if args.models is not None else set(EMBEDDING_MODELS)
+    )
+    model_nicknames = [
+        nickname for nickname in EMBEDDING_MODELS if nickname in selected_models
+    ]
+    print(f"Preparing dense indexes for: {', '.join(model_nicknames)}", flush=True)
+
     for chunking, chunks_path in CHUNK_PATHS.items():
         build_bm25_index(chunks_path, INDEXES_DIR / "bm25" / chunking)
 
-    model_nicknames = args.models or EMBEDDING_MODELS.keys()
     for nickname in model_nicknames:
         model_name = EMBEDDING_MODELS[nickname]
         for chunking, chunks_path in CHUNK_PATHS.items():

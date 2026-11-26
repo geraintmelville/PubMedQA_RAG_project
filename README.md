@@ -73,7 +73,7 @@ To prepare only one or more dense models, select their nicknames. For example, t
 python -m scripts.prepare_indexes --models GTE
 ```
 
-This creates BM25 indexes for all three chunkings and dense indexes for the configured embedding models:
+This creates BM25 indexes for all three chunkings and dense indexes only for the selected models. Without `--models`, all configured dense models are selected:
 
 - `sentence-transformers/all-MiniLM-L6-v2`
 - `NeuML/pubmedbert-base-embeddings`
